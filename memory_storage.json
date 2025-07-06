@@ -1,0 +1,106 @@
+{
+  "memories": {
+    "7ef89645": {
+      "id": "7ef89645",
+      "content": "Always validate user input before processing",
+      "tags": [
+        "security",
+        "best-practices"
+      ],
+      "timestamp": "2025-07-07T00:04:52.485086",
+      "collections": [],
+      "metadata": {
+        "context": "web development",
+        "source": "code review"
+      },
+      "importance": 0.9,
+      "collection_id": null,
+      "related_memories": []
+    },
+    "47f3927c": {
+      "id": "47f3927c",
+      "content": "Use dependency injection for better testability",
+      "tags": [
+        "architecture",
+        "testing"
+      ],
+      "timestamp": "2025-07-07T00:04:52.485214",
+      "collections": [],
+      "metadata": {
+        "language": "python",
+        "pattern": "dependency-injection"
+      },
+      "importance": 0.8,
+      "collection_id": null,
+      "related_memories": []
+    },
+    "f61a6f08": {
+      "id": "f61a6f08",
+      "content": "Database connections should be pooled for performance",
+      "tags": [
+        "database",
+        "performance"
+      ],
+      "timestamp": "2025-07-07T00:04:52.485509",
+      "collections": [],
+      "metadata": {
+        "category": "optimization"
+      },
+      "importance": 0.7,
+      "collection_id": null,
+      "related_memories": []
+    },
+    "08d36a20": {
+      "id": "08d36a20",
+      "content": "SOLID principles improve code maintainability",
+      "tags": [
+        "architecture",
+        "principles"
+      ],
+      "timestamp": "2025-07-07T00:04:52.485884",
+      "collections": [
+        "15f5cef4"
+      ],
+      "metadata": {},
+      "importance": 0.9,
+      "collection_id": "15f5cef4",
+      "related_memories": []
+    }
+  },
+  "banks": {
+    "c4c6c92b": {
+      "id": "c4c6c92b",
+      "name": "Test Knowledge Base",
+      "description": "Test memory bank for development",
+      "collections": {
+        "15f5cef4": {
+          "id": "15f5cef4",
+          "name": "Best Practices",
+          "description": "Software development best practices",
+          "memories": [
+            "08d36a20"
+          ],
+          "created_date": "2025-07-07T00:04:52.485728",
+          "tags": [
+            "best-practices",
+            "development"
+          ],
+          "archived": false
+        }
+      },
+      "all_memories": [
+        "7ef89645",
+        "47f3927c",
+        "f61a6f08",
+        "08d36a20"
+      ],
+      "created": "2025-07-07T00:04:52.484971",
+      "last_updated": "2025-07-07T00:04:52.485888",
+      "tags": [
+        "test",
+        "development"
+      ]
+    }
+  },
+  "current_bank": "c4c6c92b"
+}

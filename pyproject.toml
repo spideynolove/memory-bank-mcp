@@ -1,0 +1,22 @@
+[project]
+name = "memory-bank-mcp"
+version = "1.0.0"
+description = "Memory Bank MCP server with persistent storage and search capabilities"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.uv]
+dev-dependencies = []
+
+[project.scripts]
+memory-bank-mcp = "main:main"
