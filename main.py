@@ -543,14 +543,14 @@ This folder contains the knowledge management system for the {project_name} proj
 1. **Export Current Session**: 
 ```
 
-export\_session\_to\_file("memory-bank/thinking\_sessions/session\_YYYY-MM-DD.md")
+export_session_to_file("memory-bank/thinking_sessions/session_YYYY-MM-DD.md")
 
 ```
 
 2. **Export Domain Memories**:
 ```
 
-export\_memories\_to\_file("memory-bank/domain\_knowledge/domain\_name.json", "tag1,tag2")
+export_memories_to_file("memory-bank/domain_knowledge/domain_name.json", "tag1,tag2")
 
 ```
 
