@@ -21,7 +21,7 @@ A Model Context Protocol (MCP) server that provides persistent memory storage an
 ### Quick Setup
 
 ```bash
-git clone https://github.com/spideynolove/memory-bank-mcp
+git clone <your-repo-url>
 cd memory-bank-mcp
 uv sync
 ```
