@@ -1,3 +1,7 @@
 *.txt
 __pycache__
 .venv
+*.db
+*.backup_*
+memory_storage.json.backup_*
+.env

@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from dataclasses import asdict
 
-from main import Memory, Collection, MemorySession
+from models import Memory, Collection, MemorySession
 
 
 class DatabaseAdapter:

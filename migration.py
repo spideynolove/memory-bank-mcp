@@ -11,7 +11,7 @@ from datetime import datetime
 import uuid
 
 from database import DatabaseAdapter
-from main import Memory, Collection, MemorySession
+from models import Memory, Collection, MemorySession
 
 
 class MigrationManager:
