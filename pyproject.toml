@@ -5,7 +5,8 @@ description = "Memory Bank MCP server with persistent storage and search capabil
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.6.0",
+    "mcp[cli]==1.10.1",
+    "fastmcp==2.10.2",
 ]
 
 [build-system]

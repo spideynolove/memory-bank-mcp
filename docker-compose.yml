@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  memory-bank-mcp:
+    build: .
+    container_name: memory-bank-mcp
+    volumes:
+      # Mount the project directory for database isolation
+      - ${PROJECT_PATH:-.}:/app/project
+      # Mount the MCP source code for development
+      - .:/app/mcp
+    environment:
+      - PROJECT_PATH=/app/project
+      - SQLITE_DB_PATH=/app/project/memory.db
+      - MCP_DEBUG=${MCP_DEBUG:-false}
+    working_dir: /app/mcp
+    command: python main.py
+    networks:
+      - memory-bank-net
+    restart: unless-stopped
+    
+  # Optional: SQLite browser for database inspection
+  sqlite-browser:
+    image: coleifer/sqlite-web:latest
+    container_name: sqlite-browser
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${PROJECT_PATH:-.}:/data
+    command: sqlite_web /data/memory.db --host 0.0.0.0 --port 8080
+    networks:
+      - memory-bank-net
+    depends_on:
+      - memory-bank-mcp
+    profiles:
+      - debug
+    
+networks:
+  memory-bank-net:
+    driver: bridge
+
+volumes:
+  # Named volume for persistent storage if needed
+  memory-data:
+    driver: local

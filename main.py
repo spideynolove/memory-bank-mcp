@@ -7,6 +7,10 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP, Context
 from datetime import datetime
 
+# Import database components
+from database import DatabaseAdapter
+from migration import MigrationManager
+
 
 @dataclass
 class Memory:
@@ -54,11 +58,22 @@ class MemorySession:
 
 class MemoryBankEngine:
 
-    def __init__(self):
-        self.memories: Dict[str, Memory] = {}
-        self.sessions: Dict[str, MemorySession] = {}
+    def __init__(self, project_path: Optional[str] = None):
+        # Initialize database adapter with project isolation
+        self.db_adapter = DatabaseAdapter(project_path)
         self.current_session: Optional[str] = None
         self.patterns: Dict[str, int] = {}
+        
+        # Auto-migrate if JSON data exists
+        migrator = MigrationManager(project_path)
+        migration_result = migrator.auto_migrate_if_needed()
+        if migration_result:
+            print(f"Auto-migration completed: {migration_result['message']}")
+        
+        # Load active session if exists
+        active_session_id = self.db_adapter.get_active_session_id()
+        if active_session_id:
+            self.current_session = active_session_id
 
     def start_session(self, problem: str, criteria: str, constraints: List[str]
         ) ->str:
@@ -67,7 +82,10 @@ class MemoryBankEngine:
         session = MemorySession(id=session_id, problem_statement=problem,
             success_criteria=criteria, constraints=constraints, main_thread
             =[], collections={}, patterns=[], started=now, last_updated=now)
-        self.sessions[session_id] = session
+        
+        # Save session to database
+        self.db_adapter.create_session(session)
+        self.db_adapter.set_active_session(session_id)
         self.current_session = session_id
         return session_id
 
@@ -75,34 +93,45 @@ class MemoryBankEngine:
         confidence: float=0.8, collection_id: Optional[str]=None) ->str:
         if not self.current_session:
             raise ValueError('No active session')
+        
         memory_id = str(uuid.uuid4())[:8]
-        session = self.sessions[self.current_session]
+        session = self.db_adapter.get_session(self.current_session)
+        
         if collection_id and collection_id not in session.collections:
             raise ValueError(f'Collection {collection_id} does not exist')
+        
         memory_number = len(session.main_thread
             ) + 1 if not collection_id else len(session.collections[collection_id].
             memories) + 1
-        contradictions = self._detect_contradictions(content, dependencies or
-            [])
+        
+        contradictions = self._detect_contradictions(content, dependencies or [])
+        
         memory = Memory(id=memory_id, content=content, number=
             memory_number, total_estimated=max(5, memory_number + 2),
             timestamp=datetime.now().isoformat(), dependencies=dependencies or
             [], contradictions=contradictions, confidence=confidence,
             collection_id=collection_id)
-        self.memories[memory_id] = memory
+        
+        # Save memory to database
+        self.db_adapter.add_memory(memory)
+        
+        # Update session main_thread or collection
         if collection_id:
-            session.collections[collection_id].memories.append(memory_id)
+            collection = session.collections[collection_id]
+            collection.memories.append(memory_id)
+            self.db_adapter.update_collection(collection)
         else:
             session.main_thread.append(memory_id)
-        session.last_updated = datetime.now().isoformat()
+        
         self._update_patterns(content)
         return memory_id
 
     def revise_memory(self, original_id: str, new_content: str, confidence:
         float=0.8) ->str:
-        if original_id not in self.memories:
+        original = self.db_adapter.get_memory(original_id)
+        if not original:
             raise ValueError('Original memory not found')
-        original = self.memories[original_id]
+        
         revised_id = str(uuid.uuid4())[:8]
         revised = Memory(id=revised_id, content=new_content, number=
             original.number, total_estimated=original.total_estimated,
@@ -110,43 +139,57 @@ class MemoryBankEngine:
             dependencies, contradictions=self._detect_contradictions(
             new_content, original.dependencies), confidence=confidence,
             collection_id=original.collection_id, revision_of=original_id)
-        self.memories[revised_id] = revised
-        session = self.sessions[self.current_session]
+        
+        # Save revised memory to database
+        self.db_adapter.add_memory(revised)
+        
+        # Update session or collection references
+        session = self.db_adapter.get_session(self.current_session)
         if original.collection_id:
-            collection_memories = session.collections[original.collection_id].memories
-            idx = collection_memories.index(original_id)
-            collection_memories[idx] = revised_id
+            collection = session.collections[original.collection_id]
+            idx = collection.memories.index(original_id)
+            collection.memories[idx] = revised_id
+            self.db_adapter.update_collection(collection)
         else:
             idx = session.main_thread.index(original_id)
             session.main_thread[idx] = revised_id
+        
         return revised_id
 
     def create_collection(self, name: str, from_memory: str, purpose: str) ->str:
         if not self.current_session:
             raise ValueError('No active session')
+        
         collection_id = str(uuid.uuid4())[:8]
-        session = self.sessions[self.current_session]
         collection = Collection(id=collection_id, name=name, created_from=from_memory,
             purpose=purpose, memories=[])
-        session.collections[collection_id] = collection
+        
+        # Save collection to database
+        self.db_adapter.create_collection(collection)
         return collection_id
 
     def merge_collection(self, collection_id: str, target_memory: Optional[str]=None
         ) ->List[str]:
         if not self.current_session:
             raise ValueError('No active session')
-        session = self.sessions[self.current_session]
-        if collection_id not in session.collections:
+        
+        collection = self.db_adapter.get_collection(collection_id)
+        if not collection:
             raise ValueError('Collection not found')
-        collection = session.collections[collection_id]
+        
         merged_memories = []
         for memory_id in collection.memories:
-            memory = self.memories[memory_id]
-            memory.collection_id = None
-            session.main_thread.append(memory_id)
-            merged_memories.append(memory_id)
+            memory = self.db_adapter.get_memory(memory_id)
+            if memory:
+                memory.collection_id = None
+                self.db_adapter.update_memory(memory)
+                merged_memories.append(memory_id)
+        
+        # Update collection as merged
         collection.merged = True
         collection.merge_target = target_memory
+        self.db_adapter.update_collection(collection)
+        
         return merged_memories
 
     def _detect_contradictions(self, content: str, dependencies: List[str]
@@ -157,8 +200,9 @@ class MemoryBankEngine:
             'impossible']
         positive_indicators = ['true', 'correct', 'right', 'possible', 'valid']
         for dep_id in dependencies:
-            if dep_id in self.memories:
-                dep_content = self.memories[dep_id].content.lower()
+            memory = self.db_adapter.get_memory(dep_id)
+            if memory:
+                dep_content = memory.content.lower()
                 content_negative = any(word in content_lower for word in
                     negative_indicators)
                 dep_positive = any(word in dep_content for word in
@@ -175,22 +219,27 @@ class MemoryBankEngine:
         for phrase in key_phrases:
             if phrase in content.lower():
                 self.patterns[phrase] = self.patterns.get(phrase, 0) + 1
+        
+        # Update patterns in database
+        if self.current_session:
+            self.db_adapter.update_patterns(self.patterns, self.current_session)
 
     def get_memory_tree(self) ->Dict[str, Any]:
         if not self.current_session:
             return {}
-        session = self.sessions[self.current_session]
+        session = self.db_adapter.get_session(self.current_session)
 
         def build_tree(memory_ids: List[str]) ->List[Dict]:
             tree = []
             for mid in memory_ids:
-                memory = self.memories[mid]
-                node = {'id': mid, 'content': memory.content, 'number':
-                    memory.number, 'confidence': memory.confidence,
-                    'contradictions': len(memory.contradictions) > 0,
-                    'revision_of': memory.revision_of, 'dependencies':
-                    memory.dependencies}
-                tree.append(node)
+                memory = self.db_adapter.get_memory(mid)
+                if memory:
+                    node = {'id': mid, 'content': memory.content, 'number':
+                        memory.number, 'confidence': memory.confidence,
+                        'contradictions': len(memory.contradictions) > 0,
+                        'revision_of': memory.revision_of, 'dependencies':
+                        memory.dependencies}
+                    tree.append(node)
             return tree
         result = {'problem': session.problem_statement, 'main_thread':
             build_tree(session.main_thread), 'collections': {}}
@@ -203,11 +252,22 @@ class MemoryBankEngine:
     def get_analysis(self) ->Dict[str, Any]:
         if not self.current_session:
             return {}
-        session = self.sessions[self.current_session]
-        all_memories = [self.memories[mid] for mid in session.main_thread]
+        session = self.db_adapter.get_session(self.current_session)
+        all_memories = []
+        
+        # Get all memories from main thread
+        for mid in session.main_thread:
+            memory = self.db_adapter.get_memory(mid)
+            if memory:
+                all_memories.append(memory)
+        
+        # Get all memories from collections
         for collection in session.collections.values():
-            all_memories.extend([self.memories[mid] for mid in collection.memories]
-                )
+            for mid in collection.memories:
+                memory = self.db_adapter.get_memory(mid)
+                if memory:
+                    all_memories.append(memory)
+        
         contradictions = sum(1 for m in all_memories if m.contradictions)
         avg_confidence = sum(m.confidence for m in all_memories) / len(
             all_memories) if all_memories else 0
@@ -221,7 +281,7 @@ class MemoryBankEngine:
     def _assess_quality(self) ->str:
         if not self.current_session:
             return 'unknown'
-        session = self.sessions[self.current_session]
+        session = self.db_adapter.get_session(self.current_session)
         total_memories = len(session.main_thread)
         if total_memories < 3:
             return 'insufficient'
@@ -254,9 +314,9 @@ def store_memory(content: str, dependencies: str='', confidence: float=0.8,
         ] if dependencies else []
     collection = collection_id if collection_id else None
     memory_id = engine.add_memory(content, dep_list, confidence, collection)
-    memory = engine.memories[memory_id]
+    memory = engine.db_adapter.get_memory(memory_id)
     result = f'Added memory {memory_id}: {content[:50]}...'
-    if memory.contradictions:
+    if memory and memory.contradictions:
         result += f" WARNING: Contradicts: {', '.join(memory.contradictions)}"
     return result
 
