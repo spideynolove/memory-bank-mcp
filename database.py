@@ -5,13 +5,9 @@ Handles SQLite operations and project-specific database management
 
 import sqlite3
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
-from dataclasses import asdict
-
-from models import Memory, Collection, MemorySession
+from typing import Dict, List, Optional, Any
+from models import Memory, Collection, MemorySession, PackageAPI, CodebasePattern, CodingSession, ValidationCheck
 
 
 class DatabaseAdapter:
@@ -331,6 +327,179 @@ class DatabaseAdapter:
         # This is a placeholder for migration logic
         return True
     
+    def create_coding_session(self, coding_session: CodingSession) -> str:
+        """Create a coding-specific session extension"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO coding_sessions (
+                    session_id, session_type, project_path, language, framework,
+                    packages_discovered, patterns_stored, validation_checks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                coding_session.session_id,
+                coding_session.session_type,
+                coding_session.project_path,
+                coding_session.language,
+                coding_session.framework,
+                coding_session.packages_discovered,
+                coding_session.patterns_stored,
+                coding_session.validation_checks
+            ))
+            conn.commit()
+        return coding_session.session_id
+
+    def add_package_api(self, package_api: PackageAPI) -> str:
+        """Add a package API to the database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO package_apis (
+                    id, session_id, package_name, api_signature, usage_example,
+                    documentation, discovered_at, last_used, usage_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                package_api.id,
+                package_api.session_id,
+                package_api.package_name,
+                package_api.api_signature,
+                package_api.usage_example,
+                package_api.documentation,
+                package_api.discovered_at,
+                package_api.last_used,
+                package_api.usage_count
+            ))
+            conn.commit()
+        return package_api.id
+
+    def get_package_apis(self, session_id: str) -> List[PackageAPI]:
+        """Get all package APIs for a session"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, session_id, package_name, api_signature, usage_example,
+                       documentation, discovered_at, last_used, usage_count
+                FROM package_apis WHERE session_id = ?
+            """, (session_id,))
+            
+            apis = []
+            for row in cursor.fetchall():
+                apis.append(PackageAPI(
+                    id=row[0],
+                    session_id=row[1],
+                    package_name=row[2],
+                    api_signature=row[3],
+                    usage_example=row[4],
+                    documentation=row[5],
+                    discovered_at=row[6],
+                    last_used=row[7],
+                    usage_count=row[8]
+                ))
+            return apis
+
+    def add_codebase_pattern(self, pattern: CodebasePattern) -> str:
+        """Add a codebase pattern to the database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO codebase_patterns (
+                    id, session_id, pattern_type, code_snippet, description,
+                    language, file_path, created_at, updated_at, tags_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pattern.id,
+                pattern.session_id,
+                pattern.pattern_type,
+                pattern.code_snippet,
+                pattern.description,
+                pattern.language,
+                pattern.file_path,
+                pattern.created_at,
+                pattern.updated_at,
+                json.dumps(pattern.tags)
+            ))
+            conn.commit()
+        return pattern.id
+
+    def get_codebase_patterns(self, session_id: str, pattern_type: str = None) -> List[CodebasePattern]:
+        """Get codebase patterns for a session"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if pattern_type:
+                cursor.execute("""
+                    SELECT id, session_id, pattern_type, code_snippet, description,
+                           language, file_path, created_at, updated_at, tags_json
+                    FROM codebase_patterns WHERE session_id = ? AND pattern_type = ?
+                """, (session_id, pattern_type))
+            else:
+                cursor.execute("""
+                    SELECT id, session_id, pattern_type, code_snippet, description,
+                           language, file_path, created_at, updated_at, tags_json
+                    FROM codebase_patterns WHERE session_id = ?
+                """, (session_id,))
+            
+            patterns = []
+            for row in cursor.fetchall():
+                patterns.append(CodebasePattern(
+                    id=row[0],
+                    session_id=row[1],
+                    pattern_type=row[2],
+                    code_snippet=row[3],
+                    description=row[4],
+                    language=row[5],
+                    file_path=row[6],
+                    created_at=row[7],
+                    updated_at=row[8],
+                    tags=json.loads(row[9])
+                ))
+            return patterns
+
+    def add_validation_check(self, validation_check: ValidationCheck) -> str:
+        """Add a validation check to the database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO validation_checks (
+                    id, session_id, check_type, target_code, result,
+                    message, suggestions_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                validation_check.id,
+                validation_check.session_id,
+                validation_check.check_type,
+                validation_check.target_code,
+                validation_check.result,
+                validation_check.message,
+                json.dumps(validation_check.suggestions),
+                validation_check.created_at
+            ))
+            conn.commit()
+        return validation_check.id
+
+    def get_validation_checks(self, session_id: str) -> List[ValidationCheck]:
+        """Get validation checks for a session"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, session_id, check_type, target_code, result,
+                       message, suggestions_json, created_at
+                FROM validation_checks WHERE session_id = ?
+            """, (session_id,))
+            
+            checks = []
+            for row in cursor.fetchall():
+                checks.append(ValidationCheck(
+                    id=row[0],
+                    session_id=row[1],
+                    check_type=row[2],
+                    target_code=row[3],
+                    result=row[4],
+                    message=row[5],
+                    suggestions=json.loads(row[6]),
+                    created_at=row[7]
+                ))
+            return checks
+
     def get_database_info(self) -> Dict[str, Any]:
         """Get database information and statistics"""
         with sqlite3.connect(self.db_path) as conn:
@@ -346,11 +515,23 @@ class DatabaseAdapter:
             cursor.execute("SELECT COUNT(*) FROM collections")
             collections_count = cursor.fetchone()[0]
             
+            cursor.execute("SELECT COUNT(*) FROM package_apis")
+            package_apis_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM codebase_patterns")
+            patterns_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM validation_checks")
+            validation_checks_count = cursor.fetchone()[0]
+            
             return {
                 "database_path": str(self.db_path),
                 "project_path": self.project_path,
                 "sessions_count": sessions_count,
                 "memories_count": memories_count,
                 "collections_count": collections_count,
+                "package_apis_count": package_apis_count,
+                "codebase_patterns_count": patterns_count,
+                "validation_checks_count": validation_checks_count,
                 "database_size": self.db_path.stat().st_size if self.db_path.exists() else 0
             }

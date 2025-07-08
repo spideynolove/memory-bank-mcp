@@ -1,14 +1,19 @@
 import json
 import uuid
-from typing import Dict, List, Optional, Any, Set
-from dataclasses import dataclass, asdict
+import importlib
+import inspect
+import ast
+import os
+import sys
+from typing import Dict, List, Optional, Any
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP, Context
 from datetime import datetime
 
 # Import data models
-from models import Memory, Collection, MemorySession
+from models import Memory, Collection, MemorySession, PackageAPI, CodebasePattern, CodingSession, ValidationCheck
 
 # Import database components
 from database import DatabaseAdapter
@@ -34,8 +39,8 @@ class MemoryBankEngine:
         if active_session_id:
             self.current_session = active_session_id
 
-    def start_session(self, problem: str, criteria: str, constraints: List[str]
-        ) ->str:
+    def start_session(self, problem: str, criteria: str, constraints: List[str],
+                      session_type: str = "general") -> str:
         session_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
         session = MemorySession(id=session_id, problem_statement=problem,
@@ -46,7 +51,236 @@ class MemoryBankEngine:
         self.db_adapter.create_session(session)
         self.db_adapter.set_active_session(session_id)
         self.current_session = session_id
+        
+        # Create coding session if it's a coding-specific session
+        if session_type in ["coding_session", "debugging_session", "architecture_session"]:
+            self.create_coding_session(session_id, session_type)
+        
         return session_id
+
+    def create_coding_session(self, session_id: str, session_type: str,
+                             project_path: Optional[str] = None,
+                             language: Optional[str] = None,
+                             framework: Optional[str] = None) -> str:
+        """Create a coding-specific session extension"""
+        coding_session = CodingSession(
+            session_id=session_id,
+            session_type=session_type,
+            project_path=project_path or os.getcwd(),
+            language=language,
+            framework=framework
+        )
+        
+        # Save to database (implement in database adapter)
+        self.db_adapter.create_coding_session(coding_session)
+        return session_id
+
+    def discover_packages(self, scan_imports: bool = True) -> List[PackageAPI]:
+        """Discover available packages and their APIs"""
+        if not self.current_session:
+            raise ValueError("No active session")
+        
+        discovered_apis = []
+        
+        if scan_imports:
+            # Scan current environment for installed packages
+            for package_name in sys.modules.keys():
+                if not package_name.startswith('_') and '.' not in package_name:
+                    try:
+                        module = importlib.import_module(package_name)
+                        api_info = self._extract_api_info(module, package_name)
+                        if api_info:
+                            for api in api_info:
+                                api_id = str(uuid.uuid4())[:8]
+                                package_api = PackageAPI(
+                                    id=api_id,
+                                    session_id=self.current_session,
+                                    package_name=package_name,
+                                    api_signature=api['signature'],
+                                    usage_example=api.get('example'),
+                                    documentation=api.get('doc'),
+                                    discovered_at=datetime.now().isoformat()
+                                )
+                                self.db_adapter.add_package_api(package_api)
+                                discovered_apis.append(package_api)
+                    except Exception:
+                        continue
+        
+        return discovered_apis
+
+    def _extract_api_info(self, module, package_name: str) -> List[Dict]:
+        """Extract API information from a module"""
+        api_info = []
+        
+        try:
+            for name, obj in inspect.getmembers(module):
+                if not name.startswith('_') and (inspect.isfunction(obj) or inspect.isclass(obj)):
+                    try:
+                        signature = str(inspect.signature(obj))
+                        doc = inspect.getdoc(obj) or ""
+                        api_info.append({
+                            'name': name,
+                            'signature': f"{package_name}.{name}{signature}",
+                            'doc': doc[:200] if doc else "",
+                            'example': f"import {package_name}\\n{package_name}.{name}()"
+                        })
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        
+        return api_info[:10]  # Limit to prevent overwhelming
+
+    def validate_package_usage(self, code_snippet: str) -> ValidationCheck:
+        """Validate if code uses existing packages appropriately"""
+        if not self.current_session:
+            raise ValueError("No active session")
+        
+        check_id = str(uuid.uuid4())[:8]
+        suggestions = []
+        result = "passed"
+        message = "Code validation passed"
+        
+        try:
+            # Parse the code to find imports and function calls
+            tree = ast.parse(code_snippet)
+            imports = []
+            function_calls = []
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imports.extend([alias.name for alias in node.names])
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        imports.append(node.module)
+                elif isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name):
+                        function_calls.append(node.func.id)
+            
+            # Check for potential reinvention
+            existing_apis = self.db_adapter.get_package_apis(self.current_session)
+            for api in existing_apis:
+                if any(call in api.api_signature for call in function_calls):
+                    suggestions.append(f"Consider using existing API: {api.api_signature}")
+            
+            # Check if common functionality is being reimplemented
+            common_patterns = [
+                ("def.*request.*http", "Consider using requests library"),
+                ("def.*parse.*json", "Consider using json.loads()"),
+                ("def.*format.*date", "Consider using datetime.strftime()"),
+                ("class.*Exception", "Consider using built-in exceptions")
+            ]
+            
+            import re
+            for pattern, suggestion in common_patterns:
+                if re.search(pattern, code_snippet, re.IGNORECASE):
+                    suggestions.append(suggestion)
+                    result = "warning"
+                    message = "Potential reinvention detected"
+        
+        except Exception as e:
+            result = "failed"
+            message = f"Validation failed: {str(e)}"
+        
+        validation_check = ValidationCheck(
+            id=check_id,
+            session_id=self.current_session,
+            check_type="package_usage",
+            target_code=code_snippet,
+            result=result,
+            message=message,
+            suggestions=suggestions,
+            created_at=datetime.now().isoformat()
+        )
+        
+        self.db_adapter.add_validation_check(validation_check)
+        return validation_check
+
+    def explore_existing_apis(self, functionality: str) -> List[PackageAPI]:
+        """Explore existing APIs that might provide the needed functionality"""
+        if not self.current_session:
+            raise ValueError("No active session")
+        
+        matching_apis = []
+        existing_apis = self.db_adapter.get_package_apis(self.current_session)
+        
+        # Simple keyword matching
+        keywords = functionality.lower().split()
+        for api in existing_apis:
+            api_text = f"{api.api_signature} {api.documentation}".lower()
+            if any(keyword in api_text for keyword in keywords):
+                matching_apis.append(api)
+        
+        return matching_apis
+
+    def store_codebase_pattern(self, pattern_type: str, code_snippet: str,
+                              description: str = "", language: str = "",
+                              file_path: str = "", tags: List[str] = None) -> str:
+        """Store a codebase pattern for future reference"""
+        if not self.current_session:
+            raise ValueError("No active session")
+        
+        pattern_id = str(uuid.uuid4())[:8]
+        pattern = CodebasePattern(
+            id=pattern_id,
+            session_id=self.current_session,
+            pattern_type=pattern_type,
+            code_snippet=code_snippet,
+            description=description,
+            language=language,
+            file_path=file_path,
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            tags=tags or []
+        )
+        
+        self.db_adapter.add_codebase_pattern(pattern)
+        return pattern_id
+
+    def load_codebase_context(self, project_path: str = None) -> Dict[str, Any]:
+        """Load existing codebase structure and patterns into memory"""
+        if not self.current_session:
+            raise ValueError("No active session")
+        
+        project_path = project_path or os.getcwd()
+        context = {
+            "project_path": project_path,
+            "file_structure": [],
+            "patterns": [],
+            "imports": [],
+            "functions": []
+        }
+        
+        try:
+            # Scan project files
+            for root, dirs, files in os.walk(project_path):
+                for file in files:
+                    if file.endswith(('.py', '.js', '.ts', '.java', '.cpp', '.c')):
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, project_path)
+                        context["file_structure"].append(rel_path)
+                        
+                        # Extract patterns from Python files
+                        if file.endswith('.py'):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                    # Store as pattern
+                                    pattern_id = self.store_codebase_pattern(
+                                        "structure",
+                                        content[:1000],  # First 1000 chars
+                                        f"Code structure from {rel_path}",
+                                        "python",
+                                        rel_path
+                                    )
+                                    context["patterns"].append(pattern_id)
+                            except Exception:
+                                continue
+        
+        except Exception as e:
+            context["error"] = str(e)
+        
+        return context
 
     def add_memory(self, content: str, dependencies: List[str]=None,
         confidence: float=0.8, collection_id: Optional[str]=None) ->str:
@@ -258,25 +492,46 @@ engine = MemoryBankEngine()
 
 @mcp.tool()
 def create_memory_session(problem: str, success_criteria: str, constraints:
-    str='', ctx: Context=None) ->str:
+    str='', session_type: str='general', ctx: Context=None) ->str:
     constraint_list = [c.strip() for c in constraints.split(',') if c.strip()
         ] if constraints else []
     session_id = engine.start_session(problem, success_criteria,
-        constraint_list)
-    return f'Started memory session {session_id} for: {problem}'
+        constraint_list, session_type)
+    return f'Started {session_type} session {session_id} for: {problem}'
 
 
 @mcp.tool()
 def store_memory(content: str, dependencies: str='', confidence: float=0.8,
-    collection_id: str='', ctx: Context=None) ->str:
+    collection_id: str='', code_snippet: str='', language: str='',
+    pattern_type: str='', ctx: Context=None) ->str:
     dep_list = [d.strip() for d in dependencies.split(',') if d.strip()
         ] if dependencies else []
     collection = collection_id if collection_id else None
+    
+    # Store the memory
     memory_id = engine.add_memory(content, dep_list, confidence, collection)
     memory = engine.db_adapter.get_memory(memory_id)
-    result = f'Added memory {memory_id}: {content[:50]}...'
+    
+    # If code snippet is provided, also store it as a codebase pattern
+    if code_snippet and engine.current_session:
+        try:
+            pattern_id = engine.store_codebase_pattern(
+                pattern_type or "memory_code",
+                code_snippet,
+                f"Code associated with memory {memory_id}: {content[:50]}...",
+                language,
+                "",
+                [f"memory_{memory_id}"]
+            )
+            result = f'Added memory {memory_id} with code pattern {pattern_id}: {content[:50]}...'
+        except Exception:
+            result = f'Added memory {memory_id}: {content[:50]}...'
+    else:
+        result = f'Added memory {memory_id}: {content[:50]}...'
+    
     if memory and memory.contradictions:
         result += f" WARNING: Contradicts: {', '.join(memory.contradictions)}"
+    
     return result
 
 
@@ -717,6 +972,181 @@ def update_project_index(section: str, content: str, ctx: Context = None) -> str
         
     except Exception as e:
         return f"Error updating project index: {str(e)}"
+
+
+# Coding Integration Tools
+
+@mcp.tool()
+def discover_packages(scan_imports: bool = True, ctx: Context = None) -> str:
+    """Discover available packages and their APIs"""
+    try:
+        apis = engine.discover_packages(scan_imports)
+        return f"Discovered {len(apis)} package APIs and stored them in the current session"
+    except Exception as e:
+        return f"Error discovering packages: {str(e)}"
+
+
+@mcp.tool()
+def validate_package_usage(code_snippet: str, ctx: Context = None) -> str:
+    """Validate if code uses existing packages appropriately"""
+    try:
+        check = engine.validate_package_usage(code_snippet)
+        result = f"Validation {check.result}: {check.message}"
+        if check.suggestions:
+            result += f"\nSuggestions:\n" + "\n".join(f"- {s}" for s in check.suggestions)
+        return result
+    except Exception as e:
+        return f"Error validating package usage: {str(e)}"
+
+
+@mcp.tool()
+def explore_existing_apis(functionality: str, ctx: Context = None) -> str:
+    """Explore existing APIs that might provide the needed functionality"""
+    try:
+        apis = engine.explore_existing_apis(functionality)
+        if not apis:
+            return f"No existing APIs found for '{functionality}'"
+        
+        result = f"Found {len(apis)} existing APIs for '{functionality}':\n"
+        for api in apis:
+            result += f"- {api.api_signature}\n"
+            if api.usage_example:
+                result += f"  Example: {api.usage_example}\n"
+        return result
+    except Exception as e:
+        return f"Error exploring APIs: {str(e)}"
+
+
+@mcp.tool()
+def store_codebase_pattern(pattern_type: str, code_snippet: str, description: str = "",
+                          language: str = "", file_path: str = "", tags: str = "",
+                          ctx: Context = None) -> str:
+    """Store a codebase pattern for future reference"""
+    try:
+        tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
+        pattern_id = engine.store_codebase_pattern(
+            pattern_type, code_snippet, description, language, file_path, tag_list
+        )
+        return f"Stored codebase pattern {pattern_id} (type: {pattern_type})"
+    except Exception as e:
+        return f"Error storing pattern: {str(e)}"
+
+
+@mcp.tool()
+def load_codebase_context(project_path: str = "", ctx: Context = None) -> str:
+    """Load existing codebase structure and patterns into memory"""
+    try:
+        context = engine.load_codebase_context(project_path or None)
+        result = f"Loaded codebase context from {context['project_path']}\n"
+        result += f"Files scanned: {len(context['file_structure'])}\n"
+        result += f"Patterns stored: {len(context['patterns'])}\n"
+        if context.get('error'):
+            result += f"Warning: {context['error']}\n"
+        return result
+    except Exception as e:
+        return f"Error loading codebase context: {str(e)}"
+
+
+@mcp.tool()
+def prevent_reinvention_check(functionality_description: str, ctx: Context = None) -> str:
+    """Check if functionality might already exist in known packages"""
+    try:
+        # This is a comprehensive check that combines API exploration and validation
+        apis = engine.explore_existing_apis(functionality_description)
+        
+        if not apis:
+            return f"No existing APIs found for '{functionality_description}'. Safe to implement."
+        
+        result = f"⚠️ POTENTIAL REINVENTION DETECTED ⚠️\n"
+        result += f"Found {len(apis)} existing APIs for '{functionality_description}':\n"
+        
+        for api in apis:
+            result += f"\n📦 {api.package_name}\n"
+            result += f"  API: {api.api_signature}\n"
+            if api.usage_example:
+                result += f"  Example: {api.usage_example}\n"
+            if api.documentation:
+                result += f"  Docs: {api.documentation[:100]}...\n"
+        
+        result += f"\n💡 Recommendation: Consider using these existing APIs instead of implementing from scratch."
+        return result
+    except Exception as e:
+        return f"Error checking for reinvention: {str(e)}"
+
+
+@mcp.resource('codebase://packages')
+def get_discovered_packages() -> str:
+    """Get discovered packages in the current session"""
+    try:
+        if not engine.current_session:
+            return "No active session"
+        
+        apis = engine.db_adapter.get_package_apis(engine.current_session)
+        packages = {}
+        
+        for api in apis:
+            if api.package_name not in packages:
+                packages[api.package_name] = []
+            packages[api.package_name].append({
+                'signature': api.api_signature,
+                'usage_example': api.usage_example,
+                'documentation': api.documentation
+            })
+        
+        return json.dumps(packages, indent=2)
+    except Exception as e:
+        return f"Error getting packages: {str(e)}"
+
+
+@mcp.resource('codebase://patterns')
+def get_codebase_patterns() -> str:
+    """Get stored codebase patterns"""
+    try:
+        if not engine.current_session:
+            return "No active session"
+        
+        patterns = engine.db_adapter.get_codebase_patterns(engine.current_session)
+        pattern_data = []
+        
+        for pattern in patterns:
+            pattern_data.append({
+                'id': pattern.id,
+                'type': pattern.pattern_type,
+                'description': pattern.description,
+                'language': pattern.language,
+                'file_path': pattern.file_path,
+                'tags': pattern.tags,
+                'code_snippet': pattern.code_snippet[:200] + "..." if len(pattern.code_snippet) > 200 else pattern.code_snippet
+            })
+        
+        return json.dumps(pattern_data, indent=2)
+    except Exception as e:
+        return f"Error getting patterns: {str(e)}"
+
+
+@mcp.resource('codebase://validation-checks')
+def get_validation_checks() -> str:
+    """Get validation checks for the current session"""
+    try:
+        if not engine.current_session:
+            return "No active session"
+        
+        checks = engine.db_adapter.get_validation_checks(engine.current_session)
+        check_data = []
+        
+        for check in checks:
+            check_data.append({
+                'id': check.id,
+                'type': check.check_type,
+                'result': check.result,
+                'message': check.message,
+                'suggestions': check.suggestions,
+                'created_at': check.created_at
+            })
+        
+        return json.dumps(check_data, indent=2)
+    except Exception as e:
+        return f"Error getting validation checks: {str(e)}"
 
 
 def main():
