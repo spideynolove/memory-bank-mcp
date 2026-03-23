@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /home/hung/MCPs/memory/.claude/hooks/pre_compact.py"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /home/hung/MCPs/memory/.claude/hooks/user_prompt_submit.py"
+          },
+          {
+            "type": "command",
+            "command": "python /home/hung/MCPs/memory/.claude/hooks/context_router.py"
+          }
+        ]
+      }
+    ]
+  }
+}

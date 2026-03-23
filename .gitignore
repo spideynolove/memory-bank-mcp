@@ -6,3 +6,4 @@ memory_storage.json.backup_*
 .env
 *.backup
 # *.db
+temp

@@ -1,7 +1,3 @@
-"""
-Data models for Memory Bank MCP
-"""
-
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -20,6 +16,11 @@ class Memory:
     revision_of: Optional[str] = None
     is_checkpoint: bool = False
     tags: List[str] = None
+    trigger: Optional[str] = None
+    memory_type: Optional[str] = None
+    has_user_correction: bool = False
+    priority: int = 2
+    disclosure: Optional[str] = None
 
     def __post_init__(self):
         if self.tags is None:
@@ -67,7 +68,7 @@ class PackageAPI:
 class CodebasePattern:
     id: str
     session_id: str
-    pattern_type: str  # 'api_usage', 'integration', 'structure', 'template'
+    pattern_type: str
     code_snippet: str
     description: Optional[str] = None
     language: Optional[str] = None
@@ -84,7 +85,7 @@ class CodebasePattern:
 @dataclass
 class CodingSession:
     session_id: str
-    session_type: str  # 'coding_session', 'debugging_session', 'architecture_session'
+    session_type: str
     project_path: Optional[str] = None
     language: Optional[str] = None
     framework: Optional[str] = None
@@ -97,9 +98,9 @@ class CodingSession:
 class ValidationCheck:
     id: str
     session_id: str
-    check_type: str  # 'package_usage', 'api_existence', 'reinvention_prevention'
+    check_type: str
     target_code: str
-    result: str  # 'passed', 'failed', 'warning'
+    result: str
     message: Optional[str] = None
     suggestions: List[str] = None
     created_at: Optional[str] = None
@@ -107,3 +108,31 @@ class ValidationCheck:
     def __post_init__(self):
         if self.suggestions is None:
             self.suggestions = []
+
+
+@dataclass
+class ToolError:
+    id: str
+    session_id: str
+    tool_name: str
+    error_message: str
+    error_context: Optional[str] = None
+    frequency: int = 1
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    resolved: bool = False
+    resolution_note: Optional[str] = None
+
+
+@dataclass
+class RuleViolation:
+    id: str
+    session_id: str
+    rule_id: str
+    rule_content: str
+    violation_type: str
+    before_content: str
+    after_content: str
+    detected_at: str
+    frequency: int = 1
+    resolved: bool = False

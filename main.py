@@ -12,10 +12,10 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP, Context
 from datetime import datetime
 
-# Import data models
-from models import Memory, Collection, MemorySession, PackageAPI, CodebasePattern, CodingSession, ValidationCheck
+                    
+from models import Memory, Collection, MemorySession, PackageAPI, CodebasePattern, CodingSession, ValidationCheck, RuleViolation
 
-# Import database components
+                            
 from database import DatabaseAdapter
 from migration import MigrationManager
 
@@ -23,18 +23,18 @@ from migration import MigrationManager
 class MemoryBankEngine:
 
     def __init__(self, project_path: Optional[str] = None):
-        # Initialize database adapter with project isolation
+                                                            
         self.db_adapter = DatabaseAdapter(project_path)
         self.current_session: Optional[str] = None
         self.patterns: Dict[str, int] = {}
         
-        # Auto-migrate if JSON data exists
+                                          
         migrator = MigrationManager(project_path)
         migration_result = migrator.auto_migrate_if_needed()
         if migration_result:
             print(f"Auto-migration completed: {migration_result['message']}")
         
-        # Load active session if exists
+                                       
         active_session_id = self.db_adapter.get_active_session_id()
         if active_session_id:
             self.current_session = active_session_id
@@ -47,12 +47,12 @@ class MemoryBankEngine:
             success_criteria=criteria, constraints=constraints, main_thread
             =[], collections={}, patterns=[], started=now, last_updated=now)
         
-        # Save session to database
+                                  
         self.db_adapter.create_session(session)
         self.db_adapter.set_active_session(session_id)
         self.current_session = session_id
         
-        # Create coding session if it's a coding-specific session
+                                                                 
         if session_type in ["coding_session", "debugging_session", "architecture_session"]:
             self.create_coding_session(session_id, session_type)
         
@@ -62,7 +62,6 @@ class MemoryBankEngine:
                              project_path: Optional[str] = None,
                              language: Optional[str] = None,
                              framework: Optional[str] = None) -> str:
-        """Create a coding-specific session extension"""
         coding_session = CodingSession(
             session_id=session_id,
             session_type=session_type,
@@ -71,19 +70,18 @@ class MemoryBankEngine:
             framework=framework
         )
         
-        # Save to database (implement in database adapter)
+                                                          
         self.db_adapter.create_coding_session(coding_session)
         return session_id
 
     def discover_packages(self, scan_imports: bool = True) -> List[PackageAPI]:
-        """Discover available packages and their APIs"""
         if not self.current_session:
             raise ValueError("No active session")
         
         discovered_apis = []
         
         if scan_imports:
-            # Scan current environment for installed packages
+                                                             
             for package_name in sys.modules.keys():
                 if not package_name.startswith('_') and '.' not in package_name:
                     try:
@@ -109,7 +107,6 @@ class MemoryBankEngine:
         return discovered_apis
 
     def _extract_api_info(self, module, package_name: str) -> List[Dict]:
-        """Extract API information from a module"""
         api_info = []
         
         try:
@@ -129,10 +126,9 @@ class MemoryBankEngine:
         except Exception:
             pass
         
-        return api_info[:10]  # Limit to prevent overwhelming
+        return api_info[:10]                                 
 
     def validate_package_usage(self, code_snippet: str) -> ValidationCheck:
-        """Validate if code uses existing packages appropriately"""
         if not self.current_session:
             raise ValueError("No active session")
         
@@ -142,7 +138,7 @@ class MemoryBankEngine:
         message = "Code validation passed"
         
         try:
-            # Parse the code to find imports and function calls
+                                                               
             tree = ast.parse(code_snippet)
             imports = []
             function_calls = []
@@ -157,13 +153,13 @@ class MemoryBankEngine:
                     if isinstance(node.func, ast.Name):
                         function_calls.append(node.func.id)
             
-            # Check for potential reinvention
+                                             
             existing_apis = self.db_adapter.get_package_apis(self.current_session)
             for api in existing_apis:
                 if any(call in api.api_signature for call in function_calls):
                     suggestions.append(f"Consider using existing API: {api.api_signature}")
             
-            # Check if common functionality is being reimplemented
+                                                                  
             common_patterns = [
                 ("def.*request.*http", "Consider using requests library"),
                 ("def.*parse.*json", "Consider using json.loads()"),
@@ -197,14 +193,13 @@ class MemoryBankEngine:
         return validation_check
 
     def explore_existing_apis(self, functionality: str) -> List[PackageAPI]:
-        """Explore existing APIs that might provide the needed functionality"""
         if not self.current_session:
             raise ValueError("No active session")
         
         matching_apis = []
         existing_apis = self.db_adapter.get_package_apis(self.current_session)
         
-        # Simple keyword matching
+                                 
         keywords = functionality.lower().split()
         for api in existing_apis:
             api_text = f"{api.api_signature} {api.documentation}".lower()
@@ -216,7 +211,6 @@ class MemoryBankEngine:
     def store_codebase_pattern(self, pattern_type: str, code_snippet: str,
                               description: str = "", language: str = "",
                               file_path: str = "", tags: List[str] = None) -> str:
-        """Store a codebase pattern for future reference"""
         if not self.current_session:
             raise ValueError("No active session")
         
@@ -238,7 +232,6 @@ class MemoryBankEngine:
         return pattern_id
 
     def load_codebase_context(self, project_path: str = None) -> Dict[str, Any]:
-        """Load existing codebase structure and patterns into memory"""
         if not self.current_session:
             raise ValueError("No active session")
         
@@ -252,7 +245,7 @@ class MemoryBankEngine:
         }
         
         try:
-            # Scan project files
+                                
             for root, dirs, files in os.walk(project_path):
                 for file in files:
                     if file.endswith(('.py', '.js', '.ts', '.java', '.cpp', '.c')):
@@ -260,15 +253,15 @@ class MemoryBankEngine:
                         rel_path = os.path.relpath(file_path, project_path)
                         context["file_structure"].append(rel_path)
                         
-                        # Extract patterns from Python files
+                                                            
                         if file.endswith('.py'):
                             try:
                                 with open(file_path, 'r', encoding='utf-8') as f:
                                     content = f.read()
-                                    # Store as pattern
+                                                      
                                     pattern_id = self.store_codebase_pattern(
                                         "structure",
-                                        content[:1000],  # First 1000 chars
+                                        content[:1000],                    
                                         f"Code structure from {rel_path}",
                                         "python",
                                         rel_path
@@ -283,39 +276,44 @@ class MemoryBankEngine:
         return context
 
     def add_memory(self, content: str, dependencies: List[str]=None,
-        confidence: float=0.8, collection_id: Optional[str]=None) ->str:
+        confidence: float=0.8, collection_id: Optional[str]=None,
+        trigger: Optional[str]=None, memory_type: Optional[str]=None,
+        has_user_correction: bool=False, priority: int=2,
+        disclosure: Optional[str]=None) ->str:
         if not self.current_session:
             raise ValueError('No active session')
-        
+
         memory_id = str(uuid.uuid4())[:8]
         session = self.db_adapter.get_session(self.current_session)
-        
+
         if collection_id and collection_id not in session.collections:
             raise ValueError(f'Collection {collection_id} does not exist')
-        
+
         memory_number = len(session.main_thread
             ) + 1 if not collection_id else len(session.collections[collection_id].
             memories) + 1
-        
+
         contradictions = self._detect_contradictions(content, dependencies or [])
-        
+
         memory = Memory(id=memory_id, content=content, number=
             memory_number, total_estimated=max(5, memory_number + 2),
             timestamp=datetime.now().isoformat(), dependencies=dependencies or
             [], contradictions=contradictions, confidence=confidence,
-            collection_id=collection_id)
-        
-        # Save memory to database
+            collection_id=collection_id, trigger=trigger,
+            memory_type=memory_type, has_user_correction=has_user_correction,
+            priority=priority, disclosure=disclosure)
+
+
         self.db_adapter.add_memory(memory)
-        
-        # Update session main_thread or collection
+
+
         if collection_id:
             collection = session.collections[collection_id]
             collection.memories.append(memory_id)
             self.db_adapter.update_collection(collection)
         else:
             session.main_thread.append(memory_id)
-        
+
         self._update_patterns(content)
         return memory_id
 
@@ -333,10 +331,10 @@ class MemoryBankEngine:
             new_content, original.dependencies), confidence=confidence,
             collection_id=original.collection_id, revision_of=original_id)
         
-        # Save revised memory to database
+                                         
         self.db_adapter.add_memory(revised)
         
-        # Update session or collection references
+                                                 
         session = self.db_adapter.get_session(self.current_session)
         if original.collection_id:
             collection = session.collections[original.collection_id]
@@ -357,7 +355,7 @@ class MemoryBankEngine:
         collection = Collection(id=collection_id, name=name, created_from=from_memory,
             purpose=purpose, memories=[])
         
-        # Save collection to database
+                                     
         self.db_adapter.create_collection(collection)
         return collection_id
 
@@ -378,7 +376,7 @@ class MemoryBankEngine:
                 self.db_adapter.update_memory(memory)
                 merged_memories.append(memory_id)
         
-        # Update collection as merged
+                                     
         collection.merged = True
         collection.merge_target = target_memory
         self.db_adapter.update_collection(collection)
@@ -413,7 +411,7 @@ class MemoryBankEngine:
             if phrase in content.lower():
                 self.patterns[phrase] = self.patterns.get(phrase, 0) + 1
         
-        # Update patterns in database
+                                     
         if self.current_session:
             self.db_adapter.update_patterns(self.patterns, self.current_session)
 
@@ -448,13 +446,13 @@ class MemoryBankEngine:
         session = self.db_adapter.get_session(self.current_session)
         all_memories = []
         
-        # Get all memories from main thread
+                                           
         for mid in session.main_thread:
             memory = self.db_adapter.get_memory(mid)
             if memory:
                 all_memories.append(memory)
         
-        # Get all memories from collections
+                                           
         for collection in session.collections.values():
             for mid in collection.memories:
                 memory = self.db_adapter.get_memory(mid)
@@ -485,6 +483,112 @@ class MemoryBankEngine:
         else:
             return 'good'
 
+    def get_boot_memories(self) ->str:
+        if not self.current_session:
+            return json.dumps({'error': 'No active session'})
+        session = self.db_adapter.get_session(self.current_session)
+        boot_memories = []
+
+        for mid in session.main_thread:
+            memory = self.db_adapter.get_memory(mid)
+            if memory and memory.priority <= 1:
+                boot_memories.append({
+                    'id': memory.id,
+                    'content': memory.content,
+                    'priority': memory.priority,
+                    'disclosure': memory.disclosure,
+                    'memory_type': memory.memory_type
+                })
+
+        boot_memories.sort(key=lambda x: x['priority'])
+        return json.dumps({
+            'session_id': self.current_session,
+            'boot_memories': boot_memories,
+            'count': len(boot_memories)
+        }, indent=2)
+
+    def get_memory_index(self) ->str:
+        if not self.current_session:
+            return json.dumps({'error': 'No active session'})
+        session = self.db_adapter.get_session(self.current_session)
+
+        index = {'priority_0': [], 'priority_1': [], 'priority_2+': []}
+        all_memories = []
+
+        for mid in session.main_thread:
+            memory = self.db_adapter.get_memory(mid)
+            if memory:
+                all_memories.append(memory)
+
+        for collection in session.collections.values():
+            for mid in collection.memories:
+                memory = self.db_adapter.get_memory(mid)
+                if memory and memory.id not in {m.id for m in all_memories}:
+                    all_memories.append(memory)
+
+        for memory in all_memories:
+            entry = {
+                'id': memory.id,
+                'content': memory.content[:100] + '...' if len(memory.content) > 100 else memory.content,
+                'priority': memory.priority,
+                'disclosure': memory.disclosure,
+                'memory_type': memory.memory_type,
+                'timestamp': memory.timestamp
+            }
+            if memory.priority == 0:
+                index['priority_0'].append(entry)
+            elif memory.priority == 1:
+                index['priority_1'].append(entry)
+            else:
+                index['priority_2+'].append(entry)
+
+        return json.dumps({
+            'session_id': self.current_session,
+            'index': index,
+            'total_count': len(all_memories)
+        }, indent=2)
+
+    def get_recent_memories(self) ->str:
+        if not self.current_session:
+            return json.dumps({'error': 'No active session'})
+
+        import sqlite3
+        db_path = Path(self.db_adapter.project_path) / "memory.db"
+
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, content, priority, disclosure, memory_type, timestamp
+                    FROM memories
+                    WHERE session_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT 20
+                """,
+                    (self.current_session,)
+                )
+                rows = cursor.fetchall()
+
+                recent = []
+                for row in rows:
+                    recent.append({
+                        'id': row[0],
+                        'content': row[1][:100] + '...' if len(row[1]) > 100 else row[1],
+                        'priority': row[2],
+                        'disclosure': row[3],
+                        'memory_type': row[4],
+                        'timestamp': row[5]
+                    })
+
+                return json.dumps({
+                    'session_id': self.current_session,
+                    'recent_memories': recent,
+                    'count': len(recent)
+                }, indent=2)
+        except Exception as e:
+            return json.dumps({'error': str(e)})
+
 
 mcp = FastMCP('Memory Bank')
 engine = MemoryBankEngine()
@@ -503,16 +607,20 @@ def create_memory_session(problem: str, success_criteria: str, constraints:
 @mcp.tool()
 def store_memory(content: str, dependencies: str='', confidence: float=0.8,
     collection_id: str='', code_snippet: str='', language: str='',
-    pattern_type: str='', ctx: Context=None) ->str:
+    pattern_type: str='', trigger: str='', memory_type: str='',
+    has_user_correction: bool=False, priority: int=2,
+    disclosure: str='', ctx: Context=None) ->str:
     dep_list = [d.strip() for d in dependencies.split(',') if d.strip()
         ] if dependencies else []
     collection = collection_id if collection_id else None
-    
-    # Store the memory
-    memory_id = engine.add_memory(content, dep_list, confidence, collection)
+
+    memory_id = engine.add_memory(content, dep_list, confidence, collection,
+        trigger=trigger or None, memory_type=memory_type or None,
+        has_user_correction=has_user_correction, priority=priority,
+        disclosure=disclosure or None)
     memory = engine.db_adapter.get_memory(memory_id)
-    
-    # If code snippet is provided, also store it as a codebase pattern
+
+
     if code_snippet and engine.current_session:
         try:
             pattern_id = engine.store_codebase_pattern(
@@ -528,10 +636,10 @@ def store_memory(content: str, dependencies: str='', confidence: float=0.8,
             result = f'Added memory {memory_id}: {content[:50]}...'
     else:
         result = f'Added memory {memory_id}: {content[:50]}...'
-    
+
     if memory and memory.contradictions:
         result += f" WARNING: Contradicts: {', '.join(memory.contradictions)}"
-    
+
     return result
 
 
@@ -581,28 +689,103 @@ def get_patterns() ->str:
     return json.dumps(engine.patterns, indent=2)
 
 
+@mcp.resource('system://boot')
+def system_boot() ->str:
+    return engine.get_boot_memories()
+
+
+@mcp.resource('system://index')
+def system_index() ->str:
+    return engine.get_memory_index()
+
+
+@mcp.resource('system://recent')
+def system_recent() ->str:
+    return engine.get_recent_memories()
+
+
 @mcp.prompt()
 def memory_guide() ->str:
-    return """Memory Bank Process:
+    return """Memory Bank — Workflow
 
-1. create_memory_session(problem, success_criteria, constraints)
-2. store_memory(content, dependencies, confidence, collection_id)
-3. revise_memory(memory_id, new_content, confidence) 
-4. create_collection(name, from_memory, purpose)
-5. merge_collection(collection_id, target_memory)
-6. analyze_memories()
+PRE-FLIGHT (before every task):
+  1. system://boot              → load core identity memories (priority 0-1)
+  2. memory://tree              → check active session + main thread
+  3. memory://attention-state   → check which memories are HOT/WARM/COLD
+  4. memory://codebase-patterns → recall known patterns
+  5. memory://validation-checks → recall reinvention checks
+  6. memory://tool-errors       → check frequent tool failures
+  If no session → create_memory_session(problem, success_criteria, constraints, session_type)
 
-Resources:
-- memory://tree - Complete memory structure
-- memory://analysis - Quality metrics  
-- memory://patterns - Learning insights
+CONTEXT ROUTER (automatic):
+  - HOT (>=0.8): full memory injected when triggered
+  - WARM (0.25-0.8): summary injected
+  - COLD (<0.25): not injected
+  - Memories decay when not mentioned
+  - Keywords in `trigger` field activate memories
+  - Related memories co-activate
 
-Best Practices:
-- Start with problem decomposition
-- Build logical dependencies
-- Create collections for alternatives
-- Revise when new insights emerge
-- Analyze before concluding"""
+STORE TRIGGERS — call store_memory when:
+  - A significant decision is made (include memory_type + trigger)
+  - A non-obvious dependency or constraint is discovered
+  - A bug root cause is identified
+  - An assumption is validated or invalidated
+  Confidence: 0.5=uncertain, 0.9=confident, 1.0=verified
+
+PRIORITY (affects decay rate):
+  priority=0  → slow decay (core identity, max 5)
+  priority=1  → medium-slow decay (key facts, max 15)
+  priority>=2 → fast decay (general, unlimited)
+
+TRIGGER (keywords for activation):
+  "keyword1, keyword2, phrase to match"
+  When user mentions these, memory becomes HOT
+
+DISCLOSURE (when to recall):
+  "when user mentions X"
+  "when discussing Y topic"
+  "when doing Z activity"
+
+REINVENTION CHECK — before implementing anything new:
+  prevent_reinvention_check(functionality_description)
+  Only build if no matches returned.
+
+ATTENTION TOOLS:
+  get_attention_state()     → show HOT/WARM/COLD breakdown
+  boost_memory_attention(id) → manually boost a memory score
+  reset_attention_state()    → clear all attention scores
+
+TOOL ERRORS — learn from failures:
+  extract_tool_errors()      → import queued errors from hook
+  get_frequent_errors(3)     → show recurring problems
+  resolve_tool_error(id)     → mark error as resolved
+
+REVISE — when new evidence contradicts an existing memory:
+  revise_memory(memory_id, new_content, confidence)
+  Never leave contradictions unresolved.
+
+COLLECTIONS — for competing alternatives:
+  create_collection → explore, merge_collection → consolidate winner
+
+CODEBASE — unfamiliar project:
+  load_codebase_context(project_path) then memory://codebase-patterns
+
+ANALYZE — when session is long or decision is final:
+  analyze_memories()
+
+RESOURCES:
+  system://boot                 core identity memories (priority 0-1)
+  system://index                all memories grouped by priority
+  system://recent               last 20 modified memories
+  memory://tree                 active session, main thread, collections
+  memory://attention-state      current HOT/WARM/COLD classification
+  memory://analysis             quality metrics, contradiction flags
+  memory://codebase-patterns    stored code patterns
+  memory://validation-checks    past reinvention checks
+  memory://packages             discovered package APIs
+  memory://tool-errors          aggregated tool errors by frequency
+
+Full instructions: MEMORY_BANK_INSTRUCTIONS.md"""
 
 
 @mcp.tool()
@@ -743,7 +926,7 @@ def export_memories_to_file(filename: str, tags: str = "", ctx: Context = None) 
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(export_data, f, indent=2, ensure_ascii=False)
-        return f"Exported {len(filtered_memories)} memories to {filename}" + \
+        return f"Exported {len(filtered_memories)} memories to {filename}" +\
                (f" (filtered by tags: {', '.join(tag_filter)})" if tag_filter else "")
     except Exception as e:
         return f"Error writing file: {str(e)}"
@@ -924,24 +1107,23 @@ Use the files above to understand project history before continuing development.
 
 @mcp.tool()
 def update_project_index(section: str, content: str, ctx: Context = None) -> str:
-    """Update specific section in project_knowledge_index.md"""
     index_file = Path("memory-bank/project_knowledge_index.md")
     
     if not index_file.exists():
         return "Error: project_knowledge_index.md not found. Create project structure first."
     
     try:
-        # Read current content
+                              
         with open(index_file, 'r', encoding='utf-8') as f:
             current_content = f.read()
         
-        # Add timestamp to content
+                                  
         timestamped_content = f"{content}\n*Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
         
-        # Simple append to section (could be made more sophisticated)
+                                                                     
         section_header = f"## {section}"
         if section_header in current_content:
-            # Find section and append
+                                     
             lines = current_content.split('\n')
             new_lines = []
             in_section = False
@@ -951,20 +1133,20 @@ def update_project_index(section: str, content: str, ctx: Context = None) -> str
                 if line.strip() == section_header:
                     in_section = True
                 elif line.startswith('## ') and in_section:
-                    # Found next section, insert content before it
+                                                                  
                     new_lines.insert(-1, f"\n{timestamped_content}")
                     in_section = False
             
-            # If section was last, append at end
+                                                
             if in_section:
                 new_lines.append(f"\n{timestamped_content}")
             
             updated_content = '\n'.join(new_lines)
         else:
-            # Section doesn't exist, append at end
+                                                  
             updated_content = current_content + f"\n\n{section_header}\n{timestamped_content}"
         
-        # Write back
+                    
         with open(index_file, 'w', encoding='utf-8') as f:
             f.write(updated_content)
         
@@ -974,11 +1156,10 @@ def update_project_index(section: str, content: str, ctx: Context = None) -> str
         return f"Error updating project index: {str(e)}"
 
 
-# Coding Integration Tools
+                          
 
 @mcp.tool()
 def discover_packages(scan_imports: bool = True, ctx: Context = None) -> str:
-    """Discover available packages and their APIs"""
     try:
         apis = engine.discover_packages(scan_imports)
         return f"Discovered {len(apis)} package APIs and stored them in the current session"
@@ -988,7 +1169,6 @@ def discover_packages(scan_imports: bool = True, ctx: Context = None) -> str:
 
 @mcp.tool()
 def validate_package_usage(code_snippet: str, ctx: Context = None) -> str:
-    """Validate if code uses existing packages appropriately"""
     try:
         check = engine.validate_package_usage(code_snippet)
         result = f"Validation {check.result}: {check.message}"
@@ -1001,7 +1181,6 @@ def validate_package_usage(code_snippet: str, ctx: Context = None) -> str:
 
 @mcp.tool()
 def explore_existing_apis(functionality: str, ctx: Context = None) -> str:
-    """Explore existing APIs that might provide the needed functionality"""
     try:
         apis = engine.explore_existing_apis(functionality)
         if not apis:
@@ -1021,7 +1200,6 @@ def explore_existing_apis(functionality: str, ctx: Context = None) -> str:
 def store_codebase_pattern(pattern_type: str, code_snippet: str, description: str = "",
                           language: str = "", file_path: str = "", tags: str = "",
                           ctx: Context = None) -> str:
-    """Store a codebase pattern for future reference"""
     try:
         tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
         pattern_id = engine.store_codebase_pattern(
@@ -1034,7 +1212,6 @@ def store_codebase_pattern(pattern_type: str, code_snippet: str, description: st
 
 @mcp.tool()
 def load_codebase_context(project_path: str = "", ctx: Context = None) -> str:
-    """Load existing codebase structure and patterns into memory"""
     try:
         context = engine.load_codebase_context(project_path or None)
         result = f"Loaded codebase context from {context['project_path']}\n"
@@ -1049,9 +1226,8 @@ def load_codebase_context(project_path: str = "", ctx: Context = None) -> str:
 
 @mcp.tool()
 def prevent_reinvention_check(functionality_description: str, ctx: Context = None) -> str:
-    """Check if functionality might already exist in known packages"""
     try:
-        # This is a comprehensive check that combines API exploration and validation
+                                                                                    
         apis = engine.explore_existing_apis(functionality_description)
         
         if not apis:
@@ -1076,7 +1252,6 @@ def prevent_reinvention_check(functionality_description: str, ctx: Context = Non
 
 @mcp.resource('codebase://packages')
 def get_discovered_packages() -> str:
-    """Get discovered packages in the current session"""
     try:
         if not engine.current_session:
             return "No active session"
@@ -1100,7 +1275,6 @@ def get_discovered_packages() -> str:
 
 @mcp.resource('codebase://patterns')
 def get_codebase_patterns() -> str:
-    """Get stored codebase patterns"""
     try:
         if not engine.current_session:
             return "No active session"
@@ -1126,7 +1300,6 @@ def get_codebase_patterns() -> str:
 
 @mcp.resource('codebase://validation-checks')
 def get_validation_checks() -> str:
-    """Get validation checks for the current session"""
     try:
         if not engine.current_session:
             return "No active session"
@@ -1147,6 +1320,367 @@ def get_validation_checks() -> str:
         return json.dumps(check_data, indent=2)
     except Exception as e:
         return f"Error getting validation checks: {str(e)}"
+
+
+@mcp.tool()
+def extract_tool_errors(ctx: Context = None) -> str:
+    try:
+        if not engine.current_session:
+            return "Error: No active session"
+
+        learnings_dir = Path(engine.db_adapter.project_path) / ".claude" / "learnings"
+        errors_file = learnings_dir / "tool_errors.jsonl"
+
+        if not errors_file.exists():
+            return "No tool errors found"
+
+        imported_count = 0
+        with open(errors_file, "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    error_data = entry.get("error", {})
+                    if error_data:
+                        from models import ToolError
+                        error = ToolError(
+                            id=entry.get("id", str(uuid.uuid4())[:8]),
+                            session_id=engine.current_session,
+                            tool_name=error_data.get("tool", "unknown"),
+                            error_message=error_data.get("error", "Unknown error")[:1000],
+                            error_context=error_data.get("context", ""),
+                            frequency=1,
+                            first_seen=entry.get("timestamp", datetime.now().isoformat()),
+                            last_seen=entry.get("timestamp", datetime.now().isoformat()),
+                            resolved=False
+                        )
+                        engine.db_adapter.add_or_update_tool_error(error)
+                        imported_count += 1
+                except (json.JSONDecodeError, Exception):
+                    continue
+
+        return f"Extracted {imported_count} tool errors from learnings queue"
+    except Exception as e:
+        return f"Error extracting tool errors: {str(e)}"
+
+
+@mcp.tool()
+def get_tool_errors(tool_name: str = "", unresolved_only: bool = True, ctx: Context = None) -> str:
+    try:
+        if not engine.current_session:
+            return "Error: No active session"
+
+        errors = engine.db_adapter.get_tool_errors(
+            engine.current_session,
+            tool_name=tool_name or None,
+            unresolved_only=unresolved_only
+        )
+
+        if not errors:
+            return f"No tool errors found" + (f" for tool '{tool_name}'" if tool_name else "")
+
+        result = f"Found {len(errors)} tool errors:\n\n"
+        for error in errors:
+            result += f"## Error: {error.id}\n"
+            result += f"**Tool**: {error.tool_name}\n"
+            result += f"**Frequency**: {error.frequency}\n"
+            result += f"**Message**: {error.error_message[:200]}...\n"
+            result += f"**First Seen**: {error.first_seen}\n"
+            result += f"**Last Seen**: {error.last_seen}\n"
+            if error.resolved:
+                result += f"**Status**: Resolved\n"
+            result += "\n"
+
+        return result
+    except Exception as e:
+        return f"Error getting tool errors: {str(e)}"
+
+
+@mcp.tool()
+def resolve_tool_error(error_id: str, resolution_note: str = "", ctx: Context = None) -> str:
+    try:
+        success = engine.db_adapter.resolve_tool_error(error_id, resolution_note or None)
+        if success:
+            return f"Resolved tool error {error_id}"
+        else:
+            return f"Error: Tool error {error_id} not found"
+    except Exception as e:
+        return f"Error resolving tool error: {str(e)}"
+
+
+@mcp.tool()
+def get_frequent_errors(min_frequency: int = 3, ctx: Context = None) -> str:
+    try:
+        if not engine.current_session:
+            return "Error: No active session"
+
+        errors = engine.db_adapter.get_frequent_errors(engine.current_session, min_frequency)
+
+        if not errors:
+            return f"No frequent errors found (frequency >= {min_frequency})"
+
+        result = f"⚠️ FREQUENT ERRORS (>= {min_frequency} occurrences)\n\n"
+        for error in errors:
+            result += f"### {error.tool_name} (x{error.frequency})\n"
+            result += f"**Error**: {error.error_message[:300]}...\n"
+            result += f"**ID**: {error.id}\n\n"
+
+        return result
+    except Exception as e:
+        return f"Error getting frequent errors: {str(e)}"
+
+
+@mcp.resource('memory://tool-errors')
+def get_tool_errors_resource() -> str:
+    try:
+        if not engine.current_session:
+            return json.dumps({"error": "No active session"})
+
+        errors = engine.db_adapter.get_tool_errors(engine.current_session)
+
+        error_data = []
+        for error in errors:
+            error_data.append({
+                'id': error.id,
+                'tool_name': error.tool_name,
+                'error_message': error.error_message[:200] + "..." if len(error.error_message) > 200 else error.error_message,
+                'frequency': error.frequency,
+                'first_seen': error.first_seen,
+                'last_seen': error.last_seen,
+                'resolved': error.resolved
+            })
+
+        return json.dumps({
+            'session_id': engine.current_session,
+            'total_errors': len(error_data),
+            'unresolved_count': len([e for e in error_data if not e['resolved']]),
+            'errors': error_data
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({'error': str(e)})
+
+
+@mcp.resource('memory://attention-state')
+def get_attention_state_resource() -> str:
+    try:
+        from pathlib import Path
+        state_file = Path(engine.db_adapter.project_path) / ".claude" / "attn_state.json"
+        if not state_file.exists():
+            return json.dumps({"error": "No attention state found"})
+
+        state = json.loads(state_file.read_text())
+
+        hot = [k for k, v in state['scores'].items() if v['score'] >= 0.8]
+        warm = [k for k, v in state['scores'].items() if 0.25 <= v['score'] < 0.8]
+        cold = [k for k, v in state['scores'].items() if v['score'] < 0.25]
+
+        return json.dumps({
+            'turn_count': state.get('turn_count', 0),
+            'last_update': state.get('last_update'),
+            'hot_count': len(hot),
+            'warm_count': len(warm),
+            'cold_count': len(cold),
+            'hot_memories': hot,
+            'warm_memories': warm
+        }, indent=2)
+    except Exception as e:
+        return json.dumps({'error': str(e)})
+
+
+@mcp.tool()
+def get_attention_state(ctx: Context = None) -> str:
+    try:
+        from pathlib import Path
+        state_file = Path(engine.db_adapter.project_path) / ".claude" / "attn_state.json"
+        if not state_file.exists():
+            return "No attention state found. The context router may not have run yet."
+
+        state = json.loads(state_file.read_text())
+
+        result = f"╔══ ATTENTION STATE [Turn {state.get('turn_count', 0)}] ══╗\n"
+        result += f"║ Last Update: {state.get('last_update', 'Unknown')} ║\n"
+        result += "╚" + "═" * 38 + "╝\n\n"
+
+        hot = []
+        warm = []
+        cold = []
+
+        for memory_id, data in state['scores'].items():
+            score = data['score']
+            if score >= 0.8:
+                hot.append((memory_id, score))
+            elif score >= 0.25:
+                warm.append((memory_id, score))
+            else:
+                cold.append((memory_id, score))
+
+        hot.sort(key=lambda x: x[1], reverse=True)
+        warm.sort(key=lambda x: x[1], reverse=True)
+
+        if hot:
+            result += "🔥 HOT (score >= 0.8):\n"
+            for memory_id, score in hot:
+                result += f"  - {memory_id}: {score:.2f}\n"
+            result += "\n"
+
+        if warm:
+            result += "🌡️ WARM (0.25 <= score < 0.8):\n"
+            for memory_id, score in warm[:10]:
+                result += f"  - {memory_id}: {score:.2f}\n"
+            result += "\n"
+
+        result += f"❄️ COLD (score < 0.25): {len(cold)} memories\n"
+
+        return result
+    except Exception as e:
+        return f"Error getting attention state: {str(e)}"
+
+
+@mcp.tool()
+def boost_memory_attention(memory_id: str, boost: float = 0.5, ctx: Context = None) -> str:
+    try:
+        from pathlib import Path
+        state_file = Path(engine.db_adapter.project_path) / ".claude" / "attn_state.json"
+        if not state_file.exists():
+            return "No attention state found"
+
+        state = json.loads(state_file.read_text())
+
+        if memory_id not in state['scores']:
+            state['scores'][memory_id] = {'score': 0.0, 'priority': 2}
+
+        state['scores'][memory_id]['score'] = min(1.0, state['scores'][memory_id]['score'] + boost)
+
+        state_file.write_text(json.dumps(state, indent=2))
+
+        return f"Boosted memory {memory_id} by {boost:.2f} → new score: {state['scores'][memory_id]['score']:.2f}"
+    except Exception as e:
+        return f"Error boosting memory: {str(e)}"
+
+
+@mcp.tool()
+def reset_attention_state(ctx: Context = None) -> str:
+    try:
+        from pathlib import Path
+        state_file = Path(engine.db_adapter.project_path) / ".claude" / "attn_state.json"
+
+        if state_file.exists():
+            state_file.unlink()
+
+        return "Attention state reset. All memories will start from zero attention."
+    except Exception as e:
+        return f"Error resetting attention state: {str(e)}"
+
+
+@mcp.tool()
+def analyze_corrections(before_content: str, after_content: str, ctx: Context = None) -> str:
+    try:
+        import re
+        from pathlib import Path
+
+        if not engine.current_session:
+            return "No active session. Start a session first."
+
+        session_id = engine.current_session
+        violations = []
+
+        rules = engine.db_adapter.get_all_rules()
+        rules_json = json.dumps(rules, indent=2)
+
+        memories = engine.db_adapter.get_all_memories_for_analysis()
+
+        for memory in memories:
+            if memory.memory_type == "rule" and memory.trigger:
+                rule_keywords = re.findall(r'\w+', memory.trigger.lower())
+                before_lower = before_content.lower()
+                after_lower = after_content.lower()
+
+                before_violates = any(kw in before_lower for kw in rule_keywords if len(kw) > 3)
+                after_fixed = not any(kw in after_lower for kw in rule_keywords if len(kw) > 3)
+
+                if before_violates and after_fixed:
+                    violation_id = f"viol_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"[:16]
+                    violation = RuleViolation(
+                        id=violation_id,
+                        session_id=session_id,
+                        rule_id=memory.id,
+                        rule_content=memory.content[:500],
+                        violation_type="rule_miss",
+                        before_content=before_content[:1000],
+                        after_content=after_content[:1000],
+                        detected_at=datetime.now().isoformat(),
+                        frequency=1,
+                        resolved=False
+                    )
+                    engine.db_adapter.add_or_update_rule_violation(violation)
+                    violations.append({
+                        "rule_id": memory.id,
+                        "rule_trigger": memory.trigger,
+                        "violation_id": violation_id
+                    })
+
+        if violations:
+            return json.dumps({
+                "status": "violations_found",
+                "count": len(violations),
+                "violations": violations
+            }, indent=2)
+        else:
+            return json.dumps({
+                "status": "no_violations",
+                "message": "No rule violations detected in this correction."
+            }, indent=2)
+
+    except Exception as e:
+        return f"Error analyzing corrections: {str(e)}"
+
+
+@mcp.tool()
+def get_rule_violations(unresolved_only: bool = True, ctx: Context = None) -> str:
+    try:
+        if not engine.current_session:
+            return "No active session."
+
+        violations = engine.db_adapter.get_rule_violations(
+            engine.current_session,
+            unresolved_only=unresolved_only
+        )
+
+        if not violations:
+            return "No rule violations found."
+
+        result = []
+        for v in violations:
+            result.append({
+                "id": v.id,
+                "rule_id": v.rule_id,
+                "violation_type": v.violation_type,
+                "rule_content": v.rule_content[:200] + "..." if len(v.rule_content) > 200 else v.rule_content,
+                "frequency": v.frequency,
+                "detected_at": v.detected_at,
+                "resolved": v.resolved
+            })
+
+        return json.dumps({
+            "count": len(result),
+            "violations": result
+        }, indent=2)
+
+    except Exception as e:
+        return f"Error getting rule violations: {str(e)}"
+
+
+@mcp.tool()
+def resolve_rule_violation(violation_id: str, ctx: Context = None) -> str:
+    try:
+        success = engine.db_adapter.resolve_rule_violation(violation_id)
+        if success:
+            return f"Rule violation {violation_id} marked as resolved."
+        else:
+            return f"Rule violation {violation_id} not found."
+    except Exception as e:
+        return f"Error resolving violation: {str(e)}"
 
 
 def main():
